@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NAD83 State Plane Converter: NJ 2900 &#8644; NY Long Island 3104</title>
+<title>NAD83 State Plane Converter: NJ 2900, NY East 3101, NY Long Island 3104</title>
 <style>
   body{font-family:Arial,sans-serif;background:#f3f5f7;margin:0;padding:25px;color:#1f2937}
   .container{max-width:850px;margin:auto;background:#fff;padding:25px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.15)}
@@ -35,7 +35,8 @@
 
   <div class="system">
     <strong>NJ:</strong> NAD83 / New Jersey, FIPS 2900, EPSG:3424, US survey feet<br>
-    <strong>NYLI:</strong> NAD83 / New York Long Island, FIPS 3104, EPSG:2263, US survey feet<br>
+    <strong>NY East:</strong> NAD83 / New York East, FIPS 3101, EPSG:2260, US survey feet<br>
+    <strong>NY Long Island:</strong> NAD83 / New York Long Island, FIPS 3104, EPSG:2263, US survey feet<br>
     <strong>Z:</strong> unchanged
   </div>
 
@@ -43,8 +44,12 @@
     <div>
       <label for="dir">Conversion</label>
       <select id="dir">
-        <option value="nj2ny">NJ 2900 &rarr; NY Long Island 3104</option>
-        <option value="ny2nj">NY Long Island 3104 &rarr; NJ 2900</option>
+        <option value="NJ>NYLI">NJ 2900 &rarr; NY Long Island 3104</option>
+        <option value="NYLI>NJ">NY Long Island 3104 &rarr; NJ 2900</option>
+        <option value="NJ>NYE">NJ 2900 &rarr; NY East 3101</option>
+        <option value="NYE>NJ">NY East 3101 &rarr; NJ 2900</option>
+        <option value="NYE>NYLI">NY East 3101 &rarr; NY Long Island 3104</option>
+        <option value="NYLI>NYE">NY Long Island 3104 &rarr; NY East 3101</option>
       </select>
     </div>
     <div>
@@ -69,6 +74,7 @@
   <div class="note">
     Separators can be spaces, tabs, or commas. Z (if present) and any extra columns pass through unchanged.<br>
     Example: <code>973729.62 85813.64 12.45</code> or <code>P1,973729.62,85813.64,12.45</code> (ID X Y Z)<br>
+    NJ 2900 and NY East 3101 use identical projection parameters, so those two conversions return the same X Y values.<br>
     Projection-only conversion; no datum shift between NAD83 realizations is applied.
   </div>
 </div>
@@ -77,73 +83,90 @@
 /* ---------- Projection math (GRS80, US survey foot) ---------- */
 const A_ = 6378137.0, F_ = 1 / 298.257222101, E2 = 2 * F_ - F_ * F_, E = Math.sqrt(E2);
 const FT = 1200 / 3937; // metres per US survey foot
-const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+const rad = d => d * Math.PI / 180;
 const {sin, cos, tan, atan, atan2, asin, sinh, cosh, tanh, log, sqrt, PI} = Math;
 const atanh = Math.atanh;
 
-/* NJ 2900: Transverse Mercator */
-const NJ = {lat0: rad(38 + 50 / 60), lon0: rad(-74.5), k0: 0.9999, fe: 150000, fn: 0};
-const N3 = F_ / (2 - F_);
-const AK = A_ / (1 + N3) * (1 + N3 ** 2 / 4 + N3 ** 4 / 64);
-const AL = [N3 / 2 - 2 * N3 ** 2 / 3 + 5 * N3 ** 3 / 16, 13 * N3 ** 2 / 48 - 3 * N3 ** 3 / 5, 61 * N3 ** 3 / 240];
-const BE = [N3 / 2 - 2 * N3 ** 2 / 3 + 37 * N3 ** 3 / 96, N3 ** 2 / 48 + N3 ** 3 / 15, 17 * N3 ** 3 / 480];
-const conf = lat => atan(sinh(atanh(sin(lat)) - E * atanh(E * sin(lat))));
-const arc = lat => { const x = conf(lat); return AK * (x + AL.reduce((s, a, j) => s + a * sin(2 * (j + 1) * x), 0)); };
-
-function njToLatLon(Em, Nm) {
-  const xi = (Nm - NJ.fn + NJ.k0 * arc(NJ.lat0)) / (NJ.k0 * AK), eta = (Em - NJ.fe) / (NJ.k0 * AK);
-  let xi_ = xi, eta_ = eta;
-  for (let j = 0; j < 3; j++) {
-    xi_ -= BE[j] * sin(2 * (j + 1) * xi) * cosh(2 * (j + 1) * eta);
-    eta_ -= BE[j] * cos(2 * (j + 1) * xi) * sinh(2 * (j + 1) * eta);
-  }
-  const chi = asin(sin(xi_) / cosh(eta_));
-  let lat = chi;
-  for (let i = 0; i < 10; i++) lat = asin(tanh(atanh(sin(chi)) + E * atanh(E * sin(lat))));
-  return [lat, NJ.lon0 + atan2(sinh(eta_), cos(xi_))];
-}
-function latLonToNJ(lat, lon) {
-  const c = conf(lat), dl = lon - NJ.lon0;
-  const xi_ = atan2(tan(c), cos(dl)), eta_ = atanh(sin(dl) * cos(c));
-  let xi = xi_, eta = eta_;
-  for (let j = 0; j < 3; j++) {
-    xi += AL[j] * sin(2 * (j + 1) * xi_) * cosh(2 * (j + 1) * eta_);
-    eta += AL[j] * cos(2 * (j + 1) * xi_) * sinh(2 * (j + 1) * eta_);
-  }
-  return [NJ.fe + NJ.k0 * AK * eta, NJ.fn + NJ.k0 * AK * xi - NJ.k0 * arc(NJ.lat0)];
-}
-
-/* NY Long Island 3104: Lambert Conformal Conic, 2 standard parallels */
-const P1 = rad(41 + 2 / 60), P2 = rad(40 + 40 / 60), P0 = rad(40 + 10 / 60), L0 = rad(-74), FE2 = 300000;
-const mm = p => cos(p) / sqrt(1 - E2 * sin(p) ** 2);
-const tt = p => tan(PI / 4 - p / 2) / (((1 - E * sin(p)) / (1 + E * sin(p))) ** (E / 2));
-const NN = (log(mm(P1)) - log(mm(P2))) / (log(tt(P1)) - log(tt(P2)));
-const FF = mm(P1) / (NN * tt(P1) ** NN), R0 = A_ * FF * tt(P0) ** NN;
-
-function latLonToLI(lat, lon) {
-  const r = A_ * FF * tt(lat) ** NN, th = NN * (lon - L0);
-  return [FE2 + r * sin(th), R0 - r * cos(th)];
-}
-function liToLatLon(Em, Nm) {
-  const x = Em - FE2, y = R0 - Nm;
-  const r = Math.sign(NN) * sqrt(x * x + y * y), th = atan2(Math.sign(NN) * x, Math.sign(NN) * y);
-  const t = (r / (A_ * FF)) ** (1 / NN);
-  let lat = PI / 2 - 2 * atan(t);
-  for (let i = 0; i < 10; i++)
-    lat = PI / 2 - 2 * atan(t * ((1 - E * sin(lat)) / (1 + E * sin(lat))) ** (E / 2));
-  return [lat, th / NN + L0];
+/* Transverse Mercator (used by NJ 2900 and NY East 3101) */
+function makeTM(p) {
+  const n = F_ / (2 - F_);
+  const AK = A_ / (1 + n) * (1 + n ** 2 / 4 + n ** 4 / 64);
+  const AL = [n / 2 - 2 * n ** 2 / 3 + 5 * n ** 3 / 16, 13 * n ** 2 / 48 - 3 * n ** 3 / 5, 61 * n ** 3 / 240];
+  const BE = [n / 2 - 2 * n ** 2 / 3 + 37 * n ** 3 / 96, n ** 2 / 48 + n ** 3 / 15, 17 * n ** 3 / 480];
+  const conf = lat => atan(sinh(atanh(sin(lat)) - E * atanh(E * sin(lat))));
+  const arc = lat => { const x = conf(lat); return AK * (x + AL.reduce((s, a, j) => s + a * sin(2 * (j + 1) * x), 0)); };
+  const M0 = p.k0 * arc(p.lat0);
+  return {
+    toLL(Em, Nm) {
+      const xi = (Nm - p.fn + M0) / (p.k0 * AK), eta = (Em - p.fe) / (p.k0 * AK);
+      let xi_ = xi, eta_ = eta;
+      for (let j = 0; j < 3; j++) {
+        xi_ -= BE[j] * sin(2 * (j + 1) * xi) * cosh(2 * (j + 1) * eta);
+        eta_ -= BE[j] * cos(2 * (j + 1) * xi) * sinh(2 * (j + 1) * eta);
+      }
+      const chi = asin(sin(xi_) / cosh(eta_));
+      let lat = chi;
+      for (let i = 0; i < 10; i++) lat = asin(tanh(atanh(sin(chi)) + E * atanh(E * sin(lat))));
+      return [lat, p.lon0 + atan2(sinh(eta_), cos(xi_))];
+    },
+    fromLL(lat, lon) {
+      const c = conf(lat), dl = lon - p.lon0;
+      const xi_ = atan2(tan(c), cos(dl)), eta_ = atanh(sin(dl) * cos(c));
+      let xi = xi_, eta = eta_;
+      for (let j = 0; j < 3; j++) {
+        xi += AL[j] * sin(2 * (j + 1) * xi_) * cosh(2 * (j + 1) * eta_);
+        eta += AL[j] * cos(2 * (j + 1) * xi_) * sinh(2 * (j + 1) * eta_);
+      }
+      return [p.fe + p.k0 * AK * eta, p.fn + p.k0 * AK * xi - M0];
+    }
+  };
 }
 
-function njToNyli(x, y) { const [la, lo] = njToLatLon(x * FT, y * FT); const [e, n] = latLonToLI(la, lo); return [e / FT, n / FT]; }
-function nyliToNj(x, y) { const [la, lo] = liToLatLon(x * FT, y * FT); const [e, n] = latLonToNJ(la, lo); return [e / FT, n / FT]; }
+/* Lambert Conformal Conic, 2 standard parallels (NY Long Island 3104) */
+function makeLCC(p) {
+  const mm = q => cos(q) / sqrt(1 - E2 * sin(q) ** 2);
+  const tt = q => tan(PI / 4 - q / 2) / (((1 - E * sin(q)) / (1 + E * sin(q))) ** (E / 2));
+  const n = (log(mm(p.p1)) - log(mm(p.p2))) / (log(tt(p.p1)) - log(tt(p.p2)));
+  const F = mm(p.p1) / (n * tt(p.p1) ** n), R0 = A_ * F * tt(p.p0) ** n;
+  return {
+    fromLL(lat, lon) {
+      const r = A_ * F * tt(lat) ** n, th = n * (lon - p.lon0);
+      return [p.fe + r * sin(th), R0 - r * cos(th)];
+    },
+    toLL(Em, Nm) {
+      const x = Em - p.fe, y = R0 - Nm;
+      const r = sqrt(x * x + y * y), th = atan2(x, y);
+      const t = (r / (A_ * F)) ** (1 / n);
+      let lat = PI / 2 - 2 * atan(t);
+      for (let i = 0; i < 10; i++) lat = PI / 2 - 2 * atan(t * ((1 - E * sin(lat)) / (1 + E * sin(lat))) ** (E / 2));
+      return [lat, th / n + p.lon0];
+    }
+  };
+}
+
+const ZONES = {
+  NJ:   {label: "NJ FIPS 2900 (EPSG:3424)",              tag: "NJ_FIPS2900",
+         ...makeTM({lat0: rad(38 + 50 / 60), lon0: rad(-74.5), k0: 0.9999, fe: 150000, fn: 0})},
+  NYE:  {label: "NY East FIPS 3101 (EPSG:2260)",         tag: "NYE_FIPS3101",
+         ...makeTM({lat0: rad(38 + 50 / 60), lon0: rad(-74.5), k0: 0.9999, fe: 150000, fn: 0})},
+  NYLI: {label: "NY Long Island FIPS 3104 (EPSG:2263)",  tag: "NYLI_FIPS3104",
+         ...makeLCC({p1: rad(41 + 2 / 60), p2: rad(40 + 40 / 60), p0: rad(40 + 10 / 60), lon0: rad(-74), fe: 300000})}
+};
+
+/* coordinates in US survey feet in and out */
+function convertXY(from, to, x, y) {
+  const [la, lo] = ZONES[from].toLL(x * FT, y * FT);
+  const [e, n] = ZONES[to].fromLL(la, lo);
+  return [e / FT, n / FT];
+}
 
 /* ---------- File handling ---------- */
 function convertText(text, dir, fmt) {
+  const [from, to] = dir.split(">");
   const lines = text.split(/\r?\n/);
   const first = lines.find(l => l.trim()) || "";
   const sep = first.includes("\t") ? "\t" : first.includes(",") ? "," : " ";
   const idx = fmt === "id" ? 1 : 0;
-  const fn = dir === "nj2ny" ? njToNyli : nyliToNj;
   let ok = 0; const bad = []; const rows = [];
   const out = [];
   lines.forEach((line, i) => {
@@ -151,7 +174,7 @@ function convertText(text, dir, fmt) {
     const parts = sep === " " ? line.trim().split(/\s+/) : line.split(sep).map(s => s.trim());
     const x = parseFloat(parts[idx]), y = parseFloat(parts[idx + 1]);
     if (!isFinite(x) || !isFinite(y)) { bad.push(i + 1); out.push(line); return; }
-    const [nx, ny] = fn(x, y);
+    const [nx, ny] = convertXY(from, to, x, y);
     const z = parts[idx + 2];
     if (rows.length < 10) rows.push({id: idx ? parts[0] : "", x, y, z: z === undefined ? "" : z, nx, ny});
     parts[idx] = nx.toFixed(2); parts[idx + 1] = ny.toFixed(2);
@@ -188,8 +211,8 @@ if (typeof document !== "undefined") {
   $("convertBtn").addEventListener("click", () => {
     const dir = $("dir").value;
     const res = convertText(src, dir, $("fmt").value);
-    const inName = dir === "nj2ny" ? "NJ FIPS 2900 (EPSG:3424)" : "NY Long Island FIPS 3104 (EPSG:2263)";
-    const outName = dir === "nj2ny" ? "NY Long Island FIPS 3104 (EPSG:2263)" : "NJ FIPS 2900 (EPSG:3424)";
+    const [from, to] = dir.split(">");
+    const inName = ZONES[from].label, outName = ZONES[to].label;
     if (!res.ok) {
       resetOutput();
       $("status").textContent = "No valid coordinate rows found.\nCheck the conversion and column settings.";
@@ -215,7 +238,7 @@ if (typeof document !== "undefined") {
 
   $("downloadBtn").addEventListener("click", () => {
     if (!result) return;
-    const tag = $("dir").value === "nj2ny" ? "NYLI_FIPS3104" : "NJ_FIPS2900";
+    const tag = ZONES[$("dir").value.split(">")[1]].tag;
     const name = srcName.replace(/\.[^/.]+$/, "") + "_" + tag + ".xyz";
     const url = URL.createObjectURL(new Blob([result], {type: "text/plain"}));
     const a = document.createElement("a");
@@ -224,7 +247,7 @@ if (typeof document !== "undefined") {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 }
-if (typeof module !== "undefined") module.exports = {njToNyli, nyliToNj, convertText};
+if (typeof module !== "undefined") module.exports = {convertXY, convertText};
 </script>
 </body>
 </html>
