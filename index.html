@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>NAD83 NYLI to NJ XYZ Converter</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: #f3f5f7;
+        margin: 0;
+        padding: 25px;
+    }
+
+    .container {
+        max-width: 850px;
+        margin: auto;
+        background: white;
+        padding: 25px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+    }
+
+    h1 {
+        margin-top: 0;
+        color: #1f2937;
+    }
+
+    .system {
+        background: #eef4ff;
+        padding: 15px;
+        border-radius: 7px;
+        margin-bottom: 20px;
+        line-height: 1.6;
+    }
+
+    .file-box {
+        border: 2px dashed #777;
+        padding: 25px;
+        text-align: center;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+
+    input[type="file"] {
+        font-size: 16px;
+    }
+
+    button {
+        background: #1769aa;
+        color: white;
+        border: none;
+        padding: 12px 22px;
+        font-size: 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        margin-right: 10px;
+        margin-top: 10px;
+    }
+
+    button:hover {
+        background: #0d4f82;
+    }
+
+    button:disabled {
+        background: #999;
+        cursor: not-allowed;
+    }
+
+    #downloadBtn {
+        background: #16803c;
+        display: none;
+    }
+
+    #downloadBtn:hover {
+        background: #0d612d;
+    }
+
+    .status {
+        margin-top: 20px;
+        padding: 12px;
+        background: #f5f5f5;
+        border-radius: 6px;
+        white-space: pre-line;
+    }
+
+    .preview {
+        margin-top: 20px;
+        overflow-x: auto;
+    }
+
+    table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+    }
+
+    th, td {
+        border: 1px solid #ccc;
+        padding: 7px;
+        text-align: right;
+    }
+
+    th {
+        background: #e9ecef;
+    }
+
+    .note {
+        color: #555;
+        font-size: 13px;
+        margin-top: 20px;
+    }
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>NAD83 State Plane XYZ Converter</h1>
+
+<div class="system">
+
+<strong>Input:</strong><br>
+NAD83 / New York Long Island<br>
+FIPS 3104 — EPSG:2263<br>
+US Survey Feet
+
+<br><br>
+
+<strong>Output:</strong><br>
+NAD83 / New Jersey<br>
+FIPS 2900 — EPSG:3424<br>
+US Survey Feet
+
+<br><br>
+
+<strong>Z:</strong> Unchanged
+
+</div>
+
+<div class="file-box">
+
+    <input type="file" id="fileInput" accept=".xyz,.txt">
+
+    <br>
+
+    <button id="convertBtn" onclick="convertFile()" disabled>
+        Convert XYZ
+    </button>
+
+    <button id="downloadBtn" onclick="downloadFile()">
+        Download Converted XYZ
+    </button>
+
+</div>
+
+<div id="status" class="status">
+Select an XYZ file to begin.
+</div>
+
+<div id="preview" class="preview"></div>
+
+<div class="note">
+XYZ format expected:
+<br>
+X Y Z
+<br>
+Example:
+<br>
+973729.62 85813.64 12.45
+</div>
+
+</div>
+
+<script>
+
+/* ============================================================
+   PROJECTION DEFINITIONS
+   ============================================================ */
+
+/*
+   NAD83 / New York Long Island (ftUS)
+   FIPS 3104
+   EPSG:2263
+*/
+
+proj4.defs(
+    "EPSG:2263",
+    "+proj=lcc " +
+    "+lat_0=40.1666666666667 " +
+    "+lon_0=-74 " +
+    "+lat_1=41.0333333333333 " +
+    "+lat_2=40.6666666666667 " +
+    "+x_0=300000 " +
+    "+y_0=0 " +
+    "+ellps=GRS80 " +
+    "+datum=NAD83 " +
+    "+units=us-ft " +
+    "+no_defs"
+);
+
+
+/*
+   NAD83 / New Jersey (ftUS)
+   FIPS 2900
+   EPSG:3424
+*/
+
+proj4.defs(
+    "EPSG:3424",
+    "+proj=tmerc " +
+    "+lat_0=38.8333333333333 " +
+    "+lon_0=-74.5 " +
+    "+k=0.9999 " +
+    "+x_0=150000 " +
+    "+y_0=0 " +
+    "+datum=NAD83 " +
+    "+units=us-ft " +
+    "+no_defs"
+);
+
+
+/* ============================================================
+   GLOBAL VARIABLES
+   ============================================================ */
+
+let convertedData = "";
+let selectedFileName = "";
+
+
+/* ============================================================
+   FILE SELECTION
+   ============================================================ */
+
+document.getElementById("fileInput").addEventListener("change", function() {
+
+    const file = this.files[0];
+
+    if (!file) {
+        document.getElementById("convertBtn").disabled = true;
+        return;
+    }
+
+    selectedFileName = file.name;
+
+    document.getElementById("convertBtn").disabled = false;
+
+    document.getElementById("status").textContent =
+        "Selected file:\n" + file.name;
+
+});
+
+
+/* ============================================================
+   CONVERT FILE
+   ============================================================ */
+
+function convertFile() {
+
+    const fileInput = document.getElementById("fileInput");
+
+    if (!fileInput.files.length) {
+        alert("Please select an XYZ file.");
+        return;
+    }
+
+    const file = fileInput.files[0];
+
+    const reader = new FileReader();
+
+    reader.onload = function(event) {
+
+        const text = event.target.result;
+
+        const lines = text.split(/\r?\n/);
+
+        let output = [];
+
+        let totalPoints = 0;
+        let skippedLines = 0;
+
+        let previewRows = [];
+
+        for (let i = 0; i < lines.length; i++) {
+
+            const originalLine = lines[i].trim();
+
+            if (originalLine === "") {
+                continue;
+            }
+
+            const parts = originalLine.split(/\s+/);
+
+            if (parts.length < 3) {
+                skippedLines++;
+                continue;
+            }
+
+            const x = parseFloat(parts[0]);
+            const y = parseFloat(parts[1]);
+            const z = parseFloat(parts[2]);
+
+            if (
+                !Number.isFinite(x) ||
+                !Number.isFinite(y) ||
+                !Number.isFinite(z)
+            ) {
+                skippedLines++;
+                continue;
+            }
+
+
+            /* ----------------------------------------------
+               Transform X,Y
+
+               Z is deliberately NOT transformed.
+               ---------------------------------------------- */
+
+            let result;
+
+            try {
+
+                result = proj4(
+                    "EPSG:2263",
+                    "EPSG:3424",
+                    [x, y]
+                );
+
+            } catch (error) {
+
+                skippedLines++;
+
+                continue;
+            }
+
+
+            const newX = result[0];
+            const newY = result[1];
+
+
+            /* ----------------------------------------------
+               Output precision
+               ---------------------------------------------- */
+
+            const outputLine =
+                newX.toFixed(2) + " " +
+                newY.toFixed(2) + " " +
+                z.toFixed(2);
+
+            output.push(outputLine);
+
+            totalPoints++;
+
+
+            /* ----------------------------------------------
+               Preview first 10 points
+               ---------------------------------------------- */
+
+            if (previewRows.length < 10) {
+
+                previewRows.push({
+                    oldX: x,
+                    oldY: y,
+                    oldZ: z,
+                    newX: newX,
+                    newY: newY,
+                    newZ: z
+                });
+
+            }
+
+        }
+
+
+        /* ==================================================
+           SAVE RESULT
+           ================================================== */
+
+        convertedData = output.join("\n") + "\n";
+
+
+        /* ==================================================
+           STATUS
+           ================================================== */
+
+        let statusText =
+            "Conversion completed.\n\n" +
+            "Input file: " + selectedFileName + "\n" +
+            "Points converted: " + totalPoints + "\n" +
+            "Lines skipped: " + skippedLines + "\n\n" +
+            "Input CRS: EPSG:2263\n" +
+            "Output CRS: EPSG:3424\n" +
+            "Units: US Survey Feet\n" +
+            "Z values: unchanged";
+
+        document.getElementById("status").textContent =
+            statusText;
+
+
+        /* ==================================================
+           DOWNLOAD BUTTON
+           ================================================== */
+
+        document.getElementById("downloadBtn").style.display =
+            totalPoints > 0 ? "inline-block" : "none";
+
+
+        /* ==================================================
+           PREVIEW TABLE
+           ================================================== */
+
+        createPreviewTable(previewRows);
+
+    };
+
+
+    reader.readAsText(file);
+}
+
+
+/* ============================================================
+   PREVIEW TABLE
+   ============================================================ */
+
+function createPreviewTable(rows) {
+
+    if (rows.length === 0) {
+
+        document.getElementById("preview").innerHTML =
+            "<p>No valid XYZ points found.</p>";
+
+        return;
+    }
+
+
+    let html = "";
+
+    html += "<h3>First " + rows.length + " Converted Points</h3>";
+
+    html += "<table>";
+
+    html += "<tr>";
+
+    html += "<th>Input X</th>";
+    html += "<th>Input Y</th>";
+    html += "<th>Z</th>";
+
+    html += "<th>Output X</th>";
+    html += "<th>Output Y</th>";
+    html += "<th>Z</th>";
+
+    html += "</tr>";
+
+
+    rows.forEach(function(row) {
+
+        html += "<tr>";
+
+        html += "<td>" + row.oldX.toFixed(2) + "</td>";
+        html += "<td>" + row.oldY.toFixed(2) + "</td>";
+        html += "<td>" + row.oldZ.toFixed(2) + "</td>";
+
+        html += "<td>" + row.newX.toFixed(2) + "</td>";
+        html += "<td>" + row.newY.toFixed(2) + "</td>";
+        html += "<td>" + row.newZ.toFixed(2) + "</td>";
+
+        html += "</tr>";
+
+    });
+
+
+    html += "</table>";
+
+    document.getElementById("preview").innerHTML = html;
+
+}
+
+
+/* ============================================================
+   DOWNLOAD FILE
+   ============================================================ */
+
+function downloadFile() {
+
+    if (!convertedData) {
+
+        alert("Nothing to download.");
+
+        return;
+    }
+
+
+    const originalName =
+        selectedFileName.replace(/\.[^/.]+$/, "");
+
+    const outputName =
+        originalName + "_NJ_FIPS2900.xyz";
+
+
+    const blob = new Blob(
+        [convertedData],
+        {
+            type: "text/plain"
+        }
+    );
+
+
+    const url =
+        URL.createObjectURL(blob);
+
+
+    const a =
+        document.createElement("a");
+
+    a.href = url;
+
+    a.download = outputName;
+
+    document.body.appendChild(a);
+
+    a.click();
+
+    document.body.removeChild(a);
+
+    URL.revokeObjectURL(url);
+
+}
+
+</script>
+
+</body>
+</html>
