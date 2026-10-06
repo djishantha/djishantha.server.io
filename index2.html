@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NJ FIPS 2900 → NYLI FIPS 3104</title>
+
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    margin: 30px;
+    background: #f4f4f4;
+}
+
+.container {
+    max-width: 850px;
+    margin: auto;
+    background: white;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+}
+
+h2 {
+    margin-top: 0;
+}
+
+input, button {
+    font-size: 16px;
+    padding: 10px;
+    margin: 6px 0;
+}
+
+button {
+    cursor: pointer;
+}
+
+#status {
+    margin-top: 15px;
+    padding: 10px;
+    background: #eee;
+}
+
+pre {
+    background: #111;
+    color: #eee;
+    padding: 15px;
+    overflow: auto;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>NJ FIPS 2900 → NYLI FIPS 3104</h2>
+
+<p>
+Convert XYZ coordinates from:
+<br>
+<b>NAD83 New Jersey State Plane FIPS 2900 (US Survey Feet)</b>
+<br>
+to:
+<br>
+<b>NAD83 New York Long Island State Plane FIPS 3104 (US Survey Feet)</b>
+</p>
+
+<input type="file" id="fileInput" accept=".xyz,.txt">
+
+<br>
+
+<button onclick="convertFile()">Convert XYZ</button>
+
+<div id="status">
+Waiting for XYZ file...
+</div>
+
+<pre id="preview"></pre>
+
+</div>
+
+<script>
+
+/*
+===========================================================
+SOURCE
+NAD83 / New Jersey State Plane
+FIPS 2900
+US Survey Feet
+===========================================================
+*/
+
+const NJ2900 =
+"+proj=lcc " +
+"+lat_1=41.03333333333333 " +
+"+lat_2=40.66666666666666 " +
+"+lat_0=38.83333333333334 " +
+"+lon_0=-74.0 " +
+"+x_0=492125.0 " +
+"+y_0=0.0 " +
+"+datum=NAD83 " +
+"+units=us-ft " +
+"+no_defs";
+
+
+/*
+===========================================================
+TARGET
+NAD83 / New York Long Island
+FIPS 3104
+US Survey Feet
+===========================================================
+*/
+
+const NYLI3104 =
+"+proj=lcc " +
+"+lat_1=41.03333333333333 " +
+"+lat_2=40.66666666666666 " +
+"+lat_0=40.16666666666666 " +
+"+lon_0=-74.0 " +
+"+x_0=300000.0 " +
+"+y_0=0.0 " +
+"+datum=NAD83 " +
+"+units=us-ft " +
+"+no_defs";
+
+
+function convertFile() {
+
+    const input = document.getElementById("fileInput");
+    const status = document.getElementById("status");
+    const preview = document.getElementById("preview");
+
+    if (!input.files.length) {
+        alert("Please select an XYZ file.");
+        return;
+    }
+
+    const file = input.files[0];
+
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+
+        const text = e.target.result;
+
+        const lines = text.split(/\r?\n/);
+
+        let output = [];
+        let converted = 0;
+        let skipped = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+
+            let line = lines[i].trim();
+
+            if (!line) {
+                continue;
+            }
+
+            /*
+            Accept:
+            X Y Z
+            X,Y,Z
+            */
+
+            let parts = line.split(/[\s,]+/);
+
+            if (parts.length < 3) {
+                skipped++;
+                continue;
+            }
+
+            let x = parseFloat(parts[0]);
+            let y = parseFloat(parts[1]);
+            let z = parseFloat(parts[2]);
+
+            if (!Number.isFinite(x) ||
+                !Number.isFinite(y) ||
+                !Number.isFinite(z)) {
+
+                skipped++;
+                continue;
+            }
+
+            try {
+
+                /*
+                NJ → NYLI
+
+                proj4 input:
+                [X,Y]
+
+                result:
+                [X,Y]
+                */
+
+                const result =
+                    proj4(
+                        NJ2900,
+                        NYLI3104,
+                        [x, y]
+                    );
+
+                const newX = result[0];
+                const newY = result[1];
+
+                /*
+                Keep Z unchanged
+                */
+
+                output.push(
+                    newX.toFixed(2) + " " +
+                    newY.toFixed(2) + " " +
+                    z.toFixed(2)
+                );
+
+                converted++;
+
+            } catch(err) {
+
+                console.error(err);
+                skipped++;
+            }
+        }
+
+        const outputText = output.join("\r\n");
+
+        /*
+        Preview
+        */
+
+        preview.textContent =
+            output.slice(0,20).join("\n");
+
+        status.innerHTML =
+            "<b>Conversion complete</b><br>" +
+            "Input points: " + lines.length + "<br>" +
+            "Converted: " + converted + "<br>" +
+            "Skipped: " + skipped;
+
+        /*
+        Download file
+        */
+
+        const blob =
+            new Blob(
+                [outputText + "\r\n"],
+                {type: "text/plain"}
+            );
+
+        const url =
+            URL.createObjectURL(blob);
+
+        const a =
+            document.createElement("a");
+
+        a.href = url;
+
+        /*
+        Create output filename
+        */
+
+        let name =
+            file.name.replace(/\.[^/.]+$/, "");
+
+        a.download =
+            name + "_NYLI_FIPS3104.xyz";
+
+        document.body.appendChild(a);
+
+        a.click();
+
+        document.body.removeChild(a);
+
+        URL.revokeObjectURL(url);
+
+    };
+
+    reader.readAsText(file);
+}
+
+</script>
+
+</body>
+</html>
